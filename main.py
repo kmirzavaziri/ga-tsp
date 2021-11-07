@@ -1,7 +1,12 @@
 import math
+import os
 import random
+import multiprocessing as mp
+from operator import mul
+import numpy
 
-VERBOSE_LEVEL = 1
+
+VERBOSE_LEVEL = 0
 
 
 class TSP:
@@ -66,8 +71,8 @@ class TSP:
 
 
 class Chromosome:
-    def __init__(self, tsp: TSP):
-        self.tsp = tsp
+    def __init__(self):
+        global tsp
         self.__data = list(range(tsp.dimension))
         random.shuffle(self.__data)
         self.__cached_cost = 0
@@ -80,33 +85,29 @@ class Chromosome:
         return self.cost() > other.cost()
 
     def __mul__(self, other):
-        if (type(other) != Chromosome):
-            raise Exception('Cannot crossover a with a non-chromosome.')
-
-        if (self.tsp != other.tsp):
-            raise Exception('Cannot crossover a with a chromosome of another tsp.')
-
-        (side1, side2) = random.sample(range(self.tsp.dimension + 1), 2)
+        global tsp
+        (side1, side2) = random.sample(range(tsp.dimension + 1), 2)
 
         start = min(side1, side2)
         end = max(side1, side2)
         if VERBOSE_LEVEL > 1:
             print(start, end)
 
-        first_child = Chromosome(self.tsp)
+        first_child = Chromosome()
         first_child.__data = self.__crossover(self.__data, other.__data, start, end)
 
-        second_child = Chromosome(self.tsp)
+        second_child = Chromosome()
         second_child.__data = self.__crossover(other.__data, self.__data, start, end)
 
         return [first_child, second_child]
 
     def __invert__(self):
-        (src, dst) = random.sample(range(self.tsp.dimension), 2)
+        global tsp
+        (src, dst) = random.sample(range(tsp.dimension), 2)
         if VERBOSE_LEVEL > 1:
             print(src, dst)
 
-        result = Chromosome(self.tsp)
+        result = Chromosome()
         result.__data = self.__data
         v = result.__data[src]
         result.__data = result.__data[:src] + result.__data[src + 1:]
@@ -118,10 +119,11 @@ class Chromosome:
         return other.cost() - self.cost()
 
     def cost(self):
+        global tsp
         if not self.__cache_is_valid:
             self.__cached_cost = 0
             for i in range(len(self.__data)):
-                self.__cached_cost += self.tsp.distances[self.__data[i - 1]][self.__data[i]]
+                self.__cached_cost += tsp.distances[self.__data[i - 1]][self.__data[i]]
             self.__cache_is_valid = True
         return self.__cached_cost
 
@@ -142,10 +144,10 @@ class Chromosome:
         return data
 
 
-class Population(list):
-    def __init__(self, tsp: TSP, countOrData):
+class Population:
+    def __init__(self, countOrData):
         if type(countOrData) == int:
-            self.__data = [Chromosome(tsp) for i in range(countOrData)]
+            self.__data = [Chromosome() for i in range(countOrData)]
         elif type(countOrData) == list:
             self.__data = countOrData
         else:
@@ -173,10 +175,29 @@ class Population(list):
     def __crossover(self):
         parents = self.__choose()
         random.shuffle(parents)
-        children = []
-        for i in range(0, len(parents) - 1, 2):
-            children += parents[i] * parents[i + 1]
-        return Population(None, children)
+
+        P_COUNT = os.cpu_count()
+
+        def pair_chunk_calculator(i, pair_chunk, rd):
+            rd[i] = (sum([pair[0] * pair[1] for pair in pair_chunk], []))
+
+        pair_chunks = numpy.array_split([[parents[i], parents[i + 1]] for i in range(0, len(parents) - 1, 2)], P_COUNT)
+        manager = mp.Manager()
+        rd = manager.dict()
+        processes = [mp.Process(
+            target=pair_chunk_calculator,
+            args=(i, pair_chunks[i], rd)
+        ) for i in range(P_COUNT)]
+
+        for p in processes:
+            p.start()
+
+        for p in processes:
+            p.join()
+
+        children = sum(rd.values(), [])
+
+        return Population(children)
 
     def __mutate(self):
         for child in self.__data:
@@ -220,14 +241,14 @@ elif CHOSEN == GR229:
     IMPROVEMENT_THRESHOLD = 10
     STAGNANCY_THRESHOLD = 10
 elif CHOSEN == PR1002:
-    N = 200
-    MUTATION_PROBABILITY = .8
-    REPLACEMENT_CHILDREN_PROPORTION = .5
+    N = 300
+    MUTATION_PROBABILITY = .9
+    REPLACEMENT_CHILDREN_PROPORTION = .05
 
     IMPROVEMENT_THRESHOLD = 1_000
     STAGNANCY_THRESHOLD = 5
 
-population = Population(tsp, N)
+population = Population(N)
 answer = population.answer()
 stagnancy = 0
 i = 0
@@ -236,9 +257,12 @@ while True:
     improvement = population.answer() - answer
     answer = population.answer()
 
-    if VERBOSE_LEVEL > 0:
+    if VERBOSE_LEVEL > -1:
         print(f"Iteration: {i}")
+    if VERBOSE_LEVEL > 0:
         print(f"Best Answer: {population.answer()}")
+    elif VERBOSE_LEVEL == 0:
+        print(f"Best Answer: {population.answer().cost()}")
     if VERBOSE_LEVEL > 1:
         print(f"All Answers: {population.answers()}")
 
