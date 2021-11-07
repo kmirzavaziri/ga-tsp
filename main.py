@@ -20,8 +20,9 @@ class TSP:
         self.__parse(lines)
 
     def __parse(self, lines: list):
-        def get_value(key): return next(
-            line for line in lines if line.startswith(f'{key}:'))[len(f'{key}:'):].strip()
+        def get_value(key):
+            line = next(line for line in lines if line.startswith(f'{key}'))
+            return line[line.find(':') + 1:].strip()
 
         self.dimension = int(get_value('DIMENSION'))
         self.edge_with_type = get_value('EDGE_WEIGHT_TYPE')
@@ -50,7 +51,18 @@ class TSP:
         pass
 
     def __parse_euc_2d(self, lines: list):
-        pass
+        start = next(i for i in range(len(lines)) if lines[i] == 'NODE_COORD_SECTION') + 1
+        raw_nodes = list(map(lambda line: list(map(int, line.split())), lines[start: start + self.dimension]))
+        nodes = [None] * self.dimension
+        for raw_node in raw_nodes:
+            nodes[raw_node[0] - 1] = (raw_node[1], raw_node[2])
+        self.distances = [[None for x in range(self.dimension)] for y in range(self.dimension)]
+        for i in range(self.dimension):
+            for j in range(self.dimension):
+                self.distances[i][j] = math.floor(math.sqrt(
+                    (nodes[i][0] - nodes[j][0]) ** 2 +
+                    (nodes[i][1] - nodes[j][1]) ** 2
+                ))
 
 
 class Chromosome:
@@ -186,15 +198,34 @@ class Population(list):
 
 
 BAYG29 = 'testcase.bayg29.tsp'
+GR229 = 'testcase.gr229.tsp'
+PR1002 = 'testcase.pr1002.tsp'
 
-tsp = TSP(BAYG29)
+CHOSEN = PR1002
 
-N = 500
-MUTATION_PROBABILITY = .8
-REPLACEMENT_CHILDREN_PROPORTION = .2
+tsp = TSP(PR1002)
 
-IMPROVEMENT_THRESHOLD = 10
-STAGNANCY_THRESHOLD = 10
+if CHOSEN == BAYG29:
+    N = 500
+    MUTATION_PROBABILITY = .8
+    REPLACEMENT_CHILDREN_PROPORTION = .2
+
+    IMPROVEMENT_THRESHOLD = 10
+    STAGNANCY_THRESHOLD = 10
+elif CHOSEN == GR229:
+    N = 500
+    MUTATION_PROBABILITY = .8
+    REPLACEMENT_CHILDREN_PROPORTION = .2
+
+    IMPROVEMENT_THRESHOLD = 10
+    STAGNANCY_THRESHOLD = 10
+elif CHOSEN == PR1002:
+    N = 200
+    MUTATION_PROBABILITY = .8
+    REPLACEMENT_CHILDREN_PROPORTION = .5
+
+    IMPROVEMENT_THRESHOLD = 1_000
+    STAGNANCY_THRESHOLD = 5
 
 population = Population(tsp, N)
 answer = population.answer()
