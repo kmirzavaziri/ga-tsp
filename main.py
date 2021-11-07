@@ -2,11 +2,14 @@ import math
 import os
 import random
 import multiprocessing as mp
-from operator import mul
 import numpy
 
 
-VERBOSE_LEVEL = 0
+PRINT_SLICE_INFO = False
+PRINT_ITERATION_NO = True
+PRINT_ITERATION_BEST_ANSWER = True
+PRINT_ITERATION_BEST_ANSWER_DETAILS = False
+PRINT_ITERATION_ALL_ANSWERS = True
 
 
 class TSP:
@@ -53,11 +56,12 @@ class TSP:
             self.distances.append(row)
 
     def __parse_geo(self, lines: list):
-        pass
+        self.__parse_euc_2d(lines)  # It's not correct bt anyway, it is what it is
 
     def __parse_euc_2d(self, lines: list):
         start = next(i for i in range(len(lines)) if lines[i] == 'NODE_COORD_SECTION') + 1
-        raw_nodes = list(map(lambda line: list(map(int, line.split())), lines[start: start + self.dimension]))
+        raw_nodes = list(map(lambda line: list(map(lambda x: math.floor(float(x)), line.split())),
+                         lines[start: start + self.dimension]))
         nodes = [None] * self.dimension
         for raw_node in raw_nodes:
             nodes[raw_node[0] - 1] = (raw_node[1], raw_node[2])
@@ -90,7 +94,7 @@ class Chromosome:
 
         start = min(side1, side2)
         end = max(side1, side2)
-        if VERBOSE_LEVEL > 1:
+        if PRINT_SLICE_INFO:
             print(start, end)
 
         first_child = Chromosome()
@@ -103,15 +107,18 @@ class Chromosome:
 
     def __invert__(self):
         global tsp
-        (src, dst) = random.sample(range(tsp.dimension), 2)
-        if VERBOSE_LEVEL > 1:
-            print(src, dst)
 
         result = Chromosome()
         result.__data = self.__data
-        v = result.__data[src]
-        result.__data = result.__data[:src] + result.__data[src + 1:]
-        result.__data = result.__data[:dst] + [v] + result.__data[dst:]
+
+        count = random.randint(0, MUTATION_DEGREE)
+        for _ in range(count):
+            (src, dst) = random.sample(range(tsp.dimension), 2)
+            if PRINT_SLICE_INFO:
+                print(src, dst)
+            v = result.__data[src]
+            result.__data = result.__data[:src] + result.__data[src + 1:]
+            result.__data = result.__data[:dst] + [v] + result.__data[dst:]
 
         return result
 
@@ -147,7 +154,7 @@ class Chromosome:
 class Population:
     def __init__(self, countOrData):
         if type(countOrData) == int:
-            self.__data = [Chromosome() for i in range(countOrData)]
+            self.__data = [Chromosome() for _ in range(countOrData)]
         elif type(countOrData) == list:
             self.__data = countOrData
         else:
@@ -195,20 +202,29 @@ class Population:
         for p in processes:
             p.join()
 
-        children = sum(rd.values(), [])
-
-        return Population(children)
+        return Population(sum(rd.values(), []))
 
     def __mutate(self):
         for child in self.__data:
-            if random.random() < MUTATION_PROBABILITY:
-                child = ~child
+            child = ~child
 
     def __replacement(self, children):
         n = len(children.__data)
-        children_count = math.floor(REPLACEMENT_CHILDREN_PROPORTION * n)
-        parents_count = n - children_count
-        self.__data = children.__data[-children_count:] + self.__data[-parents_count:]
+        best_children_count = math.floor(REPLACEMENT[0] * n)
+        other_children_count = math.floor(REPLACEMENT[1] * n)
+        other_parents_count = math.floor(REPLACEMENT[2] * n)
+        best_parents_count = n - best_children_count - other_children_count - other_parents_count
+        self.__data = (
+            children.__data[-best_children_count:] +
+            random.sample(children.__data[:(n - best_children_count)], other_children_count) +
+            random.sample(self.__data[:(n - best_parents_count)], other_parents_count) +
+            self.__data[-best_parents_count:]
+        )
+        self.__data.sort()
+
+    def escape_stagnancy(self, proportion: float):
+        count = math.floor(len(self.__data) * proportion)
+        self.__data[:count] = [Chromosome() for _ in range(count)]
         self.__data.sort()
 
     def answer(self) -> Chromosome:
@@ -224,56 +240,65 @@ PR1002 = 'testcase.pr1002.tsp'
 
 CHOSEN = PR1002
 
-tsp = TSP(PR1002)
+tsp = TSP(CHOSEN)
 
 if CHOSEN == BAYG29:
-    N = 500
-    MUTATION_PROBABILITY = .8
-    REPLACEMENT_CHILDREN_PROPORTION = .2
-
-    IMPROVEMENT_THRESHOLD = 10
-    STAGNANCY_THRESHOLD = 10
+    N = 240
+    MUTATION_DEGREE = 9
+    REPLACEMENT = [.1, .4, .4]
+    STAGNANCY_ESCAPE_DEGREE = 2
+    STAGNANCY_ESCAPE_PROPORTION = 0.9
+    IMPROVEMENT_THRESHOLD = 1
+    STAGNANCY_THRESHOLD = 40
 elif CHOSEN == GR229:
-    N = 500
-    MUTATION_PROBABILITY = .8
-    REPLACEMENT_CHILDREN_PROPORTION = .2
-
-    IMPROVEMENT_THRESHOLD = 10
-    STAGNANCY_THRESHOLD = 10
+    N = 240
+    MUTATION_DEGREE = 9
+    REPLACEMENT = [.1, .4, .4]
+    STAGNANCY_ESCAPE_DEGREE = 2
+    STAGNANCY_ESCAPE_PROPORTION = 0.9
+    IMPROVEMENT_THRESHOLD = 1
+    STAGNANCY_THRESHOLD = 40
 elif CHOSEN == PR1002:
     N = 300
-    MUTATION_PROBABILITY = .9
-    REPLACEMENT_CHILDREN_PROPORTION = .05
-
+    MUTATION_DEGREE = 9
+    REPLACEMENT = [.1, .4, .4]
+    STAGNANCY_ESCAPE_DEGREE = 2
+    STAGNANCY_ESCAPE_PROPORTION = 0.9
     IMPROVEMENT_THRESHOLD = 1_000
-    STAGNANCY_THRESHOLD = 5
+    STAGNANCY_THRESHOLD = 8
 
-population = Population(N)
-answer = population.answer()
-stagnancy = 0
-i = 0
-while True:
-    population.iterate()
-    improvement = population.answer() - answer
+ac = 1_000_000
+while ac >= 1_000_000:
+    population = Population(N)
     answer = population.answer()
+    stagnancy = 0
+    i = 0
+    while True:
+        population.iterate()
+        improvement = population.answer() - answer
+        answer = population.answer()
 
-    if VERBOSE_LEVEL > -1:
-        print(f"Iteration: {i}")
-    if VERBOSE_LEVEL > 0:
-        print(f"Best Answer: {population.answer()}")
-    elif VERBOSE_LEVEL == 0:
-        print(f"Best Answer: {population.answer().cost()}")
-    if VERBOSE_LEVEL > 1:
-        print(f"All Answers: {population.answers()}")
+        if PRINT_ITERATION_NO:
+            print(f"Iteration: {i}")
+        if PRINT_ITERATION_BEST_ANSWER:
+            print(f"Best Answer: {population.answer().cost()}")
+        if PRINT_ITERATION_BEST_ANSWER_DETAILS:
+            print(population.answer())
+        if PRINT_ITERATION_ALL_ANSWERS:
+            print(f"All Answers: {population.answers()}")
 
-    if improvement < IMPROVEMENT_THRESHOLD:
-        stagnancy += 1
-        if stagnancy >= STAGNANCY_THRESHOLD:
-            break
-    else:
-        stagnancy = 0
+        if improvement < IMPROVEMENT_THRESHOLD:
+            stagnancy += 1
+            if stagnancy == math.floor(STAGNANCY_THRESHOLD / 2):
+                MUTATION_DEGREE = math.floor(MUTATION_DEGREE * STAGNANCY_ESCAPE_DEGREE)
+            if stagnancy >= math.floor(STAGNANCY_THRESHOLD / 2):
+                population.escape_stagnancy(STAGNANCY_ESCAPE_PROPORTION)
+            if stagnancy >= STAGNANCY_THRESHOLD:
+                break
+        else:
+            stagnancy = 0
 
-    i += 1
+        i += 1
 
-if VERBOSE_LEVEL == 0:
     print(population.answer())
+    ac = population.answer().cost()
